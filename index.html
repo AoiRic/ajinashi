@@ -45,6 +45,30 @@ button:hover{background:#666} button:disabled{opacity:0.3; cursor:not-allowed;}
 
 <div id="setup-screen">
  <h1>デッキ編成 & スキル選択</h1>
+ 
+ <!-- HP/AP設定エリア -->
+ <div style="margin-bottom:15px; background:#444; padding:10px; border-radius:5px;">
+  <strong>初期ステータス設定:</strong><br>
+  <div style="margin-top:8px; display: flex; gap: 20px; flex-wrap: wrap;">
+   <div>
+    <label style="margin-right: 5px;">プレイヤーHP:</label>
+    <input type="number" id="player-init-hp" value="70" min="1" max="999" style="width: 60px; padding: 4px;">
+   </div>
+   <div>
+    <label style="margin-right: 5px;">プレイヤーAP:</label>
+    <input type="number" id="player-init-ap" value="30" min="0" max="999" style="width: 60px; padding: 4px;">
+   </div>
+   <div>
+    <label style="margin-right: 5px;">敵HP:</label>
+    <input type="number" id="enemy-init-hp" value="70" min="1" max="999" style="width: 60px; padding: 4px;">
+   </div>
+   <div>
+    <label style="margin-right: 5px;">敵AP:</label>
+    <input type="number" id="enemy-init-ap" value="30" min="0" max="999" style="width: 60px; padding: 4px;">
+   </div>
+  </div>
+ </div>
+ 
  <div id="passive-select-area" style="margin-bottom:15px; background:#444; padding:10px; border-radius:5px;">
   <strong>パッシブスキル選択:</strong><br>
   <div id="passive-options" style="margin-top:8px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
@@ -82,7 +106,10 @@ button:hover{background:#666} button:disabled{opacity:0.3; cursor:not-allowed;}
     <div id="enemy-statuses" class="status-area"></div>
   </div>
  </div>
- <div style="margin: 10px 0;">コスト: <span id="player-cost"></span> / <span id="player-max-cost">3</span></div>
+ <div style="margin: 10px 0;">
+  <strong>ターン数: <span id="turn-count">1</span></strong> | 
+  コスト: <span id="player-cost"></span> / <span id="player-max-cost">3</span>
+ </div>
  <div class="area"><strong>敵の行動</strong><div id="enemy-hand" class="hand-row"></div></div>
  <div class="area"><strong>自分の手札</strong><div id="player-hand" class="hand-row"></div></div>
  <div class="area"><strong>選択中</strong><div id="selected" class="hand-row"></div></div>
@@ -95,6 +122,7 @@ button:hover{background:#666} button:disabled{opacity:0.3; cursor:not-allowed;}
  </div>
  <div id="game-over" style="display:none; text-align:center; padding:20px; background: #444; margin-top: 10px; border-radius: 8px;">
   <h2 id="result-msg"></h2>
+  <div id="score-display" style="margin: 20px 0; font-size: 1.2em;"></div>
   <button onclick="location.reload()">タイトルへ戻る</button>
  </div>
  <div class="log" id="log"></div>
@@ -443,6 +471,14 @@ let playerDeckConfig = [];
 let selectedPassive = "warrior";
 let isFixedDeck1 = false;
 
+// ゲーム統計
+let gameStats = {
+  turnCount: 0,
+  playerDamageTaken: 0,
+  playerDamageDealt: 0,
+  isDefaultStats: true
+};
+
 const player={hp:70,maxHp:70,ap:30,maxAp:30,cost:3,maxCost:3,deck:[],hand:[],selected:[],discard:[],exhaust:[], statuses:{}, pendingStatuses:[], passive:"warrior", apBroken:false, apBrokenTurns:0, pendingDraws:0, pendingSpecialDraws:[]};
 const enemy ={hp:70,maxHp:70,ap:30,maxAp:30,cost:3,maxCost:3,deck:[],hand:[],selected:[],discard:[],exhaust:[], statuses:{}, pendingStatuses:[], passive:"warrior", apBroken:false, apBrokenTurns:0, pendingDraws:0, pendingSpecialDraws:[]};
 
@@ -524,6 +560,21 @@ function startGame(){
  document.getElementById("setup-screen").style.display="none";
  document.getElementById("game-screen").style.display="block";
  
+ // 設定値を取得
+ const playerInitHp = parseInt(document.getElementById("player-init-hp").value) || 70;
+ const playerInitAp = parseInt(document.getElementById("player-init-ap").value) || 30;
+ const enemyInitHp = parseInt(document.getElementById("enemy-init-hp").value) || 70;
+ const enemyInitAp = parseInt(document.getElementById("enemy-init-ap").value) || 30;
+ 
+ // 初期値かどうかをチェック（スコア表示判定用）
+ gameStats.isDefaultStats = (playerInitHp === 70 && playerInitAp === 30 && 
+                              enemyInitHp === 70 && enemyInitAp === 30);
+ 
+ // ゲーム統計をリセット
+ gameStats.turnCount = 0;
+ gameStats.playerDamageTaken = 0;
+ gameStats.playerDamageDealt = 0;
+ 
  if(isFixedDeck1){
   player.hp = player.maxHp = 60;
   player.ap = player.maxAp = 10;
@@ -533,14 +584,18 @@ function startGame(){
    kyuketsu: { stacks: 2, turns: 999 }
   };
  } else {
-  player.hp = player.maxHp = 70;
-  player.ap = player.maxAp = 30;
+  player.hp = player.maxHp = playerInitHp;
+  player.ap = player.maxAp = playerInitAp;
   player.passive = selectedPassive;
   player.statuses = {}; // 通常デッキはバフなしで開始
  }
  
  if(player.passive === "agile") player.maxCost = 4;
  if(player.passive === "ap_boost") player.maxAp += 20;
+ 
+ // 敵のステータスを設定
+ enemy.hp = enemy.maxHp = enemyInitHp;
+ enemy.ap = enemy.maxAp = enemyInitAp;
  
  player.deck = shuffle([...playerDeckConfig]);
  
@@ -557,6 +612,9 @@ function startGame(){
 }
 
 function startTurn(){
+ // ターン数を増加
+ gameStats.turnCount++;
+ 
  [player, enemy].forEach(who => {
   // APが0の場合、2ターン経過で全快
   if(who.apBroken){
@@ -748,29 +806,40 @@ function resolveTurn(){
 function applyDamageToTarget(target, dmg, isPierce){
   if(dmg <= 0) return 0;
   
+  let actualDamage = 0;
+  
   // AP貫通またはAP全損中の場合、HPに直接ダメージ
   if(isPierce || target.ap <= 0){
     const actualDmg = Math.min(dmg, target.hp);
     target.hp -= actualDmg;
-    return actualDmg;
-  }
-  
-  // APが残っている場合、9割をAPに、1割をHPに
-  const toHP = Math.floor(dmg * 0.1);
-  const toAP = Math.floor(dmg * 0.9);
-  
-  target.hp = Math.max(0, target.hp - toHP);
-  
-  if(target.ap < toAP){
-    // APが不足している場合、APを0にして過剰ダメージは切り捨て
-    target.ap = 0;
-    target.apBroken = true;
-    target.apBrokenTurns = 0; // AP全壊時にターンカウント初期化
-    return toHP; // HPに入ったダメージのみ返す
+    actualDamage = actualDmg;
   } else {
-    target.ap -= toAP;
-    return toHP + toAP;
+    // APが残っている場合、9割をAPに、1割をHPに
+    const toHP = Math.floor(dmg * 0.1);
+    const toAP = Math.floor(dmg * 0.9);
+    
+    target.hp = Math.max(0, target.hp - toHP);
+    
+    if(target.ap < toAP){
+      // APが不足している場合、APを0にして過剰ダメージは切り捨て
+      target.ap = 0;
+      target.apBroken = true;
+      target.apBrokenTurns = 0; // AP全壊時にターンカウント初期化
+      actualDamage = toHP; // HPに入ったダメージのみ返す
+    } else {
+      target.ap -= toAP;
+      actualDamage = toHP + toAP;
+    }
   }
+  
+  // ダメージ統計を記録
+  if(target === player){
+    gameStats.playerDamageTaken += actualDamage;
+  } else if(target === enemy){
+    gameStats.playerDamageDealt += actualDamage;
+  }
+  
+  return actualDamage;
 }
 
 function applyMatchStart(card, ctx, owner, opponent){
@@ -982,6 +1051,7 @@ function render(){
  
  document.getElementById("player-cost").textContent=player.cost;
  document.getElementById("player-max-cost").textContent=player.maxCost;
+ document.getElementById("turn-count").textContent=gameStats.turnCount;
  document.getElementById("deck-count").textContent=player.deck.length;
  document.getElementById("discard-count").textContent=player.discard.length;
  document.getElementById("player-statuses").innerHTML = renderStatus(player);
@@ -1034,11 +1104,100 @@ function openModal(type){
 function closeModal(){ document.getElementById("modal-overlay").style.display="none"; document.getElementById("info-modal").style.display="none"; }
 function checkEndGame(){
  if(player.hp<=0 || enemy.hp<=0) {
-  document.getElementById("controls").style.display="none"; document.getElementById("game-over").style.display="block";
-  document.getElementById("result-msg").textContent = player.hp<=0 ? "敗北..." : "勝利！";
+  document.getElementById("controls").style.display="none"; 
+  document.getElementById("game-over").style.display="block";
+  
+  const isVictory = player.hp > 0;
+  document.getElementById("result-msg").textContent = isVictory ? "勝利！" : "敗北...";
+  
+  // スコア表示（初期値の場合のみ）
+  const scoreDisplay = document.getElementById("score-display");
+  if(gameStats.isDefaultStats){
+   const score = calculateScore(isVictory);
+   scoreDisplay.innerHTML = `
+    <div style="background: #555; padding: 15px; border-radius: 8px; display: inline-block;">
+     <h3 style="margin: 0 0 10px 0; color: #f1c40f;">📊 スコア</h3>
+     <div style="text-align: left;">
+      <p style="margin: 5px 0;"><strong>総合スコア:</strong> <span style="color: #2ecc71; font-size: 1.3em;">${score.total}</span> pts</p>
+      <hr style="border-color: #777;">
+      <p style="margin: 5px 0; font-size: 0.9em;">ターン数: ${gameStats.turnCount} (${score.turnBonus} pts)</p>
+      <p style="margin: 5px 0; font-size: 0.9em;">被ダメージ: ${gameStats.playerDamageTaken} (${score.damageBonus} pts)</p>
+      <p style="margin: 5px 0; font-size: 0.9em;">与ダメージ: ${gameStats.playerDamageDealt} (${score.attackBonus} pts)</p>
+      ${isVictory ? `<p style="margin: 5px 0; font-size: 0.9em;">勝利ボーナス: ${score.victoryBonus} pts</p>` : ''}
+     </div>
+    </div>
+   `;
+  } else {
+   scoreDisplay.innerHTML = '';
+  }
+  
   render();
- } else { startTurn(); }
+ } else { 
+  startTurn(); 
+ }
 }
+
+// スコア計算関数
+function calculateScore(isVictory){
+ let score = {
+  turnBonus: 0,
+  damageBonus: 0,
+  attackBonus: 0,
+  victoryBonus: 0,
+  total: 0
+ };
+ 
+ // ターン数ボーナス（少ないほど高得点）
+ if(gameStats.turnCount <= 5){
+  score.turnBonus = 500;
+ } else if(gameStats.turnCount <= 10){
+  score.turnBonus = 300;
+ } else if(gameStats.turnCount <= 15){
+  score.turnBonus = 200;
+ } else if(gameStats.turnCount <= 20){
+  score.turnBonus = 100;
+ } else {
+  score.turnBonus = 50;
+ }
+ 
+ // 被ダメージボーナス（少ないほど高得点）
+ const damageRatio = gameStats.playerDamageTaken / 70;
+ if(damageRatio <= 0.3){
+  score.damageBonus = 500;
+ } else if(damageRatio <= 0.5){
+  score.damageBonus = 300;
+ } else if(damageRatio <= 0.7){
+  score.damageBonus = 200;
+ } else if(damageRatio <= 0.9){
+  score.damageBonus = 100;
+ } else {
+  score.damageBonus = 50;
+ }
+ 
+ // 与ダメージボーナス（多いほど高得点）
+ if(gameStats.playerDamageDealt >= 100){
+  score.attackBonus = 300;
+ } else if(gameStats.playerDamageDealt >= 80){
+  score.attackBonus = 200;
+ } else if(gameStats.playerDamageDealt >= 70){
+  score.attackBonus = 150;
+ } else if(gameStats.playerDamageDealt >= 50){
+  score.attackBonus = 100;
+ } else {
+  score.attackBonus = 50;
+ }
+ 
+ // 勝利ボーナス
+ if(isVictory){
+  score.victoryBonus = 1000;
+ }
+ 
+ // 総合スコア
+ score.total = score.turnBonus + score.damageBonus + score.attackBonus + score.victoryBonus;
+ 
+ return score;
+}
+
 initSetup();
 </script>
 </body>
