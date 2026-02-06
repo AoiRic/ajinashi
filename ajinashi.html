@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>あじなしカードバトル</title>
+<style>
+body{font-family:sans-serif;background:#222;color:#fff;padding:16px;font-size:14px}
+.area{margin:12px 0}
+.hand-row{display:flex;flex-wrap:wrap; gap:10px; min-height: 100px;}
+.card{
+ border:1px solid #aaa; padding:10px; width:200px;
+ background:#333; position:relative; border-radius: 6px;
+ cursor:pointer; transition: transform 0.1s, background 0.2s; box-sizing: border-box;
+}
+.card:hover{ background:#555; transform: translateY(-3px); border-color: #fff; }
+.card.exhaust-type { border-style: dashed; border-color: #e67e22; }
+.card.exhaust-type::after { content: "【破棄】"; position: absolute; top: 2px; right: 2px; font-size: 10px; color: #e67e22; }
+
+.type-A{color:#e74c3c; font-weight: bold;} .type-D{color:#3498db; font-weight: bold;}
+.type-B{color:#f1c40f; font-weight: bold;} .type-N{color:#aaa}
+
+.log{margin-top:16px; background:#111; padding:10px; height:300px; overflow-y:auto; line-height:1.5; border: 1px solid #444; border-radius: 4px; font-size: 0.9em;}
+.status-area { font-size: 0.85em; margin-top: 4px; min-height: 1.4em;}
+.status-item { padding: 2px 5px; border-radius: 3px; margin-right: 4px; border: 1px solid #666; cursor: help; }
+.buff { background: #1e3a1e; color: #2ecc71; }
+.debuff { background: #3a1e1e; color: #e74c3c; }
+
+.passive-badge { background: #8e44ad; color: #fff; padding: 2px 6px; border-radius: 10px; font-size: 0.75em; cursor: help; margin-left: 8px; }
+
+/* AP/HPゲージ */
+.gauge-container { width: 100%; height: 14px; background: #444; border-radius: 6px; margin: 4px 0; overflow: hidden; border: 1px solid #000; position: relative;}
+.gauge-fill { height: 100%; transition: width 0.3s; }
+.gauge-hp { background: linear-gradient(90deg, #e74c3c, #c0392b); }
+.gauge-ap { background: linear-gradient(90deg, #3498db, #2980b9); }
+.gauge-broken { background: #555 !important; }
+
+button{margin-right:8px; padding: 8px 14px; cursor: pointer; background:#444; color:#fff; border:1px solid #888; border-radius: 4px;}
+button:hover{background:#666} button:disabled{opacity:0.3; cursor:not-allowed;}
+#setup-screen { background:#333; padding:20px; border-radius:8px; border: 1px solid #555;}
+.modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:85%; max-height:80%; background:#222; border:2px solid #fff; padding:20px; overflow-y:auto; z-index:1001; border-radius: 8px; }
+.modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1000; }
+</style>
+</head>
+<body>
+
+<div id="setup-screen">
+ <h1>デッキ編成 & スキル選択</h1>
+ <div id="passive-select-area" style="margin-bottom:15px; background:#444; padding:10px; border-radius:5px;">
+  <strong>パッシブスキル選択:</strong><br>
+  <div id="passive-options" style="margin-top:8px; display: flex; flex-wrap: wrap; gap: 10px;"></div>
+ </div>
+ <div style="font-size: 1.1em; margin-bottom: 15px;">
+  <span class="type-A">Attack: <span id="cnt-attack">0</span>/5</span> | 
+  <span class="type-D">Guard(Support): <span id="cnt-defense">0</span>/5</span> | 
+  <span class="type-B">Break: <span id="cnt-break">0</span>/5</span>
+ </div>
+ <div style="margin-bottom: 20px;">
+  <button id="start-game-btn" onclick="startGame()" disabled>この構成で開始</button>
+  <button onclick="randomSetup()">ランダム作成</button>
+  <button onclick="fixedSetup1()" style="background:#2980b9;">固定デッキ1</button>
+  <button onclick="resetSetup()" style="background:#7f8c8d;">リセット</button>
+ </div>
+ <div id="pool-list" class="hand-row"></div>
+</div>
+
+<div id="game-screen" style="display:none;">
+ <div style="display:flex; justify-content: space-between; background: #333; padding: 10px; border-radius: 5px;">
+  <div style="width:48%">
+    <strong>PLAYER</strong><span id="player-passive-view"></span><br>
+    HP: <span id="player-hp"></span>/<span id="player-max-hp"></span>
+    <div class="gauge-container"><div id="player-hp-bar" class="gauge-fill gauge-hp"></div></div>
+    AP: <span id="player-ap"></span>/<span id="player-max-ap"></span>
+    <div class="gauge-container"><div id="player-ap-bar" class="gauge-fill gauge-ap"></div></div>
+    <div id="player-statuses" class="status-area"></div>
+  </div>
+  <div style="text-align: right; width:48%">
+    <strong>ENEMY</strong><span id="enemy-passive-view"></span><br>
+    HP: <span id="enemy-hp"></span>/<span id="enemy-max-hp"></span>
+    <div class="gauge-container"><div id="enemy-hp-bar" class="gauge-fill gauge-hp" style="margin-left:auto"></div></div>
+    AP: <span id="enemy-ap"></span>/<span id="enemy-max-ap"></span>
+    <div class="gauge-container"><div id="enemy-ap-bar" class="gauge-fill gauge-ap" style="margin-left:auto"></div></div>
+    <div id="enemy-statuses" class="status-area"></div>
+  </div>
+ </div>
+ <div style="margin: 10px 0;">コスト: <span id="player-cost"></span> / <span id="player-max-cost">3</span></div>
+ <div class="area"><strong>敵の行動</strong><div id="enemy-hand" class="hand-row"></div></div>
+ <div class="area"><strong>自分の手札</strong><div id="player-hand" class="hand-row"></div></div>
+ <div class="area"><strong>選択中</strong><div id="selected" class="hand-row"></div></div>
+ <div id="controls">
+  <button onclick="addWait()">無行動を追加</button>
+  <button onclick="resolveTurn()">マッチ開始</button>
+  <button onclick="openModal('deck')">山札 (<span id="deck-count">0</span>)</button>
+  <button onclick="openModal('discard')">捨て札 (<span id="discard-count">0</span>)</button>
+  <button onclick="openModal('exhaust')">破棄済</button>
+ </div>
+ <div id="game-over" style="display:none; text-align:center; padding:20px; background: #444; margin-top: 10px; border-radius: 8px;">
+  <h2 id="result-msg"></h2>
+  <button onclick="location.reload()">タイトルへ戻る</button>
+ </div>
+ <div class="log" id="log"></div>
+</div>
+
+<div id="modal-overlay" class="modal-overlay" onclick="closeModal()"></div>
+<div id="info-modal" class="modal">
+ <h3 id="modal-title" style="margin-top:0"></h3>
+ <div id="modal-contents" class="hand-row"></div>
+ <button onclick="closeModal()" style="width:100%; margin-top:20px">閉じる</button>
+</div>
+
+<script>
+const TYPE_LABEL={attack:"A",defense:"D",break:"B",none:"N"};
+const BUFFS = ["kassei", "kyojin", "kyuketsu", "overcharge_buff"];
+const DEBUFFS = ["datsuryoku", "zeijakuka", "shukketsu"];
+const STATUS_NAMES={
+  kassei:"活性",kyojin:"強靭",datsuryoku:"脱力",zeijakuka:"脆弱化",
+  kyuketsu:"吸血",shukketsu:"出血",overcharge_buff:"AP増強"
+};
+const STATUS_DESCS={
+  kassei:"活性: 与えるダメージがスタック分上昇します。", 
+  kyojin:"強靭: 受けるダメージがスタック分低下します。",
+  datsuryoku:"脱力: 与えるダメージがスタック分低下します。", 
+  zeijakuka:"脆弱化: 受けるダメージがスタック分上昇します。",
+  kyuketsu:"吸血: 勝利時にスタック数分回復します。", 
+  shukketsu:"出血: 行動するたびにスタック分のダメージを受けます。",
+  overcharge_buff:"AP増強: AP最大値がスタック分増加しています。"
+};
+const advantage={attack:"break",break:"defense",defense:"attack"};
+const REQ_EACH = 5;
+
+const PASSIVES = {
+ none: { name: "なし", desc: "パッシブなし" },
+ warrior: { name: "勇猛", desc: "与ダメ+2" }, 
+ iron: { name: "金剛", desc: "被ダメ-2" },
+ luck: { name: "幸運", desc: "最小パワー+1" }, 
+ regen: { name: "再生", desc: "ターン終了時HP+3" },
+ agile: { name: "俊敏", desc: "最大コスト4" }, 
+ incomplete_regen: { name: "不完全な再生", desc: "ターン終了時HP+1" },
+ overcharge: { name: "オーバーチャージ", desc: "APがある間パワー+2" },
+ ap_boost: { name: "AP増幅", desc: "AP最大値+20" }
+};
+
+const PLAYER_POOL = [
+ //=== ATTACK (攻撃) ===
+ // 基本攻撃
+ { id:"a1", name:"斬撃", type:"attack", cost:0, power:{min:2,max:4}, damage:{min:4,max:6}, effects:[] },
+ { id:"a2", name:"強打", type:"attack", cost:1, power:{min:3,max:5}, damage:{min:7,max:10}, effects:[] },
+ { id:"a3", name:"全力斬り", type:"attack", cost:2, power:{min:2,max:6}, damage:{min:10,max:15}, isExhaust:true, effects:[] },
+ 
+ // 連続攻撃
+ { id:"a4", name:"連撃", type:"attack", cost:2, power:{min:2,max:4}, damage:{min:3,max:4}, hits:3, effects:[] },
+ { id:"a5", name:"乱舞", type:"attack", cost:3, power:{min:1,max:3}, damage:{min:2,max:3}, hits:5, effects:[] },
+ { id:"a6", name:"二段斬り", type:"attack", cost:1, power:{min:2,max:3}, damage:{min:3,max:5}, hits:2, effects:[] },
+ 
+ // AP貫通
+ { id:"a7", name:"AP貫通突き", type:"attack", cost:2, power:{min:2,max:5}, damage:{min:6,max:8}, isApPierce:true, effects:[] },
+ { id:"a8", name:"刺突", type:"attack", cost:1, power:{min:1,max:3}, damage:{min:4,max:5}, isApPierce:true, effects:[] },
+ { id:"a9", name:"心臓狙い", type:"attack", cost:3, power:{min:3,max:5}, damage:{min:10,max:12}, isApPierce:true, isExhaust:true, effects:[] },
+ 
+ // HP依存
+ { id:"a10", name:"リベンジエッジ", type:"attack", cost:2, power:{min:3,max:4}, damage:{min:4,max:4}, isHpScale:true, effects:[] },
+ { id:"a11", name:"背水の陣", type:"attack", cost:2, power:{min:2,max:5}, damage:{min:3,max:5}, isHpScale:true, isExhaust:true, effects:[] },
+ { id:"a12", name:"怨念の刃", type:"attack", cost:1, power:{min:2,max:3}, damage:{min:2,max:3}, isHpScale:true, effects:[] },
+ 
+ // バフ付与攻撃
+ { id:"a13", name:"士気高揚", type:"attack", cost:1, power:{min:3,max:4}, damage:{min:4,max:6}, 
+ effects:[{cond:"win", effect:"buffSelf", target:"kassei", val:2, turns:3}] },
+ { id:"a14", name:"闘志の一撃", type:"attack", cost:1, power:{min:2,max:5}, damage:{min:5,max:7}, 
+ effects:[{cond:"win", effect:"buffSelf", target:"kassei", val:3, turns:2}] },
+ { id:"a15", name:"鋼の意志", type:"attack", cost:1, power:{min:2,max:4}, damage:{min:4,max:6}, 
+ effects:[{cond:"win", effect:"buffSelf", target:"kyojin", val:2, turns:3}] },
+ 
+ // デバフ付与攻撃
+ { id:"a16", name:"弱体の刃", type:"attack", cost:1, power:{min:2,max:4}, damage:{min:5,max:7}, 
+ effects:[{cond:"win", effect:"debuffEnemy", target:"datsuryoku", val:2, turns:3}] },
+ { id:"a17", name:"脆弱攻撃", type:"attack", cost:1, power:{min:3,max:5}, damage:{min:4,max:6}, 
+ effects:[{cond:"win", effect:"debuffEnemy", target:"zeijakuka", val:2, turns:3}] },
+ 
+ // ドロー付き攻撃
+ { id:"a18", name:"戦術ドロー", type:"attack", cost:1, power:{min:1,max:3}, damage:{min:3,max:5}, 
+ effects:[{cond:"win", effect:"draw", val:1}] },
+ { id:"a19", name:"狙撃", type:"attack", cost:2, power:{min:3,max:6}, damage:{min:6,max:8}, 
+ effects:[{cond:"win", effect:"draw", val:1}] },
+ 
+ // 吸血攻撃
+ { id:"a20", name:"吸血刃", type:"attack", cost:2, power:{min:3,max:5}, damage:{min:6,max:8}, 
+ effects:[{cond:"win", effect:"buffSelf", target:"kyuketsu", val:2, turns:3}] },
+ { id:"a21", name:"血の契約", type:"attack", cost:3, power:{min:2,max:4}, damage:{min:8,max:10}, 
+ effects:[{cond:"win", effect:"buffSelf", target:"kyuketsu", val:4, turns:3}], isExhaust:true },
+ 
+ //=== DEFENSE (防御) ===
+ // 基本防御
+ { id:"d1", name:"防御", type:"defense", cost:0, power:{min:2,max:5}, damage:{min:0,max:0}, effects:[] },
+ { id:"d2", name:"堅守", type:"defense", cost:1, power:{min:4,max:7}, damage:{min:0,max:0}, effects:[] },
+ { id:"d3", name:"完全防御", type:"defense", cost:2, power:{min:6,max:10}, damage:{min:0,max:0}, isExhaust:true, effects:[] },
+ 
+ // パワー上昇
+ { id:"d4", name:"集中", type:"defense", cost:1, power:{min:2,max:4}, damage:{min:0,max:0}, 
+ effects:[{cond:"matchStart", effect:"powerSelf", val:3}] },
+ { id:"d5", name:"瞑想", type:"defense", cost:2, power:{min:3,max:5}, damage:{min:0,max:0}, 
+ effects:[{cond:"matchStart", effect:"powerSelf", val:5}] },
+ 
+ // デバフ解除
+ { id:"d6", name:"止血", type:"defense", cost:0, power:{min:1,max:4}, damage:{min:0,max:0}, 
+ effects:[{cond:"always", effect:"clearDebuff"}] },
+ { id:"d7", name:"浄化", type:"defense", cost:1, power:{min:2,max:5}, damage:{min:0,max:0}, 
+ effects:[{cond:"always", effect:"clearDebuff"}] },
+ 
+ // カード破壊
+ { id:"d8", name:"重圧", type:"defense", cost:2, power:{min:2,max:5}, damage:{min:0,max:0}, 
+ effects:[{cond:"win", effect:"destroyNext"}] },
+ { id:"d9", name:"威圧", type:"defense", cost:2, power:{min:3,max:6}, damage:{min:0,max:0}, 
+ effects:[{cond:"win", effect:"destroyNext"}] },
+ 
+ // AP回復
+ { id:"d10", name:"アーマー補強", type:"defense", cost:0, power:{min:2,max:5}, damage:{min:0,max:0}, 
+ effects:[{cond:"win", effect:"recoverAp", val:5}] },
+ { id:"d11", name:"AP再構築", type:"defense", cost:1, power:{min:3,max:6}, damage:{min:0,max:0}, 
+ effects:[{cond:"always", effect:"recoverAp", val:10}] },
+ { id:"d12", name:"完全修復", type:"defense", cost:2, power:{min:4,max:7}, damage:{min:0,max:0}, 
+ effects:[{cond:"always", effect:"recoverAp", val:15}], isExhaust:true },
+ 
+ // バフ付与防御
+ { id:"d13", name:"鉄壁", type:"defense", cost:1, power:{min:4,max:6}, damage:{min:0,max:0}, 
+ effects:[{cond:"always", effect:"buffSelf", target:"kyojin", val:2, turns:2}] },
+ { id:"d14", name:"不屈の構え", type:"defense", cost:2, power:{min:3,max:5}, damage:{min:0,max:0}, 
+ effects:[{cond:"always", effect:"buffSelf", target:"kyojin", val:3, turns:3}] },
+ { id:"d15", name:"闘気高揚", type:"defense", cost:0, power:{min:2,max:4}, damage:{min:0,max:0}, 
+ effects:[{cond:"win", effect:"buffSelf", target:"kassei", val:2, turns:2}] },
+ 
+ // ドロー付き防御
+ { id:"d16", name:"見切り", type:"defense", cost:1, power:{min:1,max:3}, damage:{min:0,max:0}, 
+ effects:[{cond:"always", effect:"draw", val:1}] },
+ { id:"d17", name:"戦術再考", type:"defense", cost:2, power:{min:2,max:5}, damage:{min:0,max:0}, 
+ effects:[{cond:"win", effect:"draw", val:2}] },
+ 
+ //=== BREAK (崩し) ===
+ // 基本崩し
+ { id:"b1", name:"崩し打ち", type:"break", cost:0, power:{min:1,max:3}, damage:{min:3,max:5}, effects:[] },
+ { id:"b2", name:"強崩し", type:"break", cost:1, power:{min:2,max:5}, damage:{min:5,max:8}, effects:[] },
+ { id:"b3", name:"シールド崩し", type:"break", cost:2, power:{min:2,max:6}, damage:{min:6,max:10}, effects:[] },
+ 
+ // デバフ付与崩し
+ { id:"b4", name:"出血の呪い", type:"break", cost:1, power:{min:2,max:5}, damage:{min:4,max:8}, effects:[{cond:"win", effect:"debuffEnemy", target:"shukketsu", val:3, turns:3}] },
+ { id:"b5", name:"猛毒の刃", type:"break", cost:1, power:{min:1,max:4}, damage:{min:3,max:6}, effects:[{cond:"win", effect:"debuffEnemy", target:"shukketsu", val:5, turns:2}] },
+ { id:"b6", name:"弱体化の一撃", type:"break", cost:1, power:{min:2,max:4}, damage:{min:4,max:7}, effects:[{cond:"win", effect:"debuffEnemy", target:"datsuryoku", val:3, turns:3}] },
+ { id:"b7", name:"脆弱付与", type:"break", cost:1, power:{min:2,max:5}, damage:{min:3,max:6}, effects:[{cond:"win", effect:"debuffEnemy", target:"zeijakuka", val:3, turns:3}] },
+ 
+ // パワー操作崩し
+ { id:"b8", name:"破孔突き", type:"break", cost:3, power:{min:2,max:8}, damage:{min:10,max:10, mult:1.5}, effects:[{cond:"matchStart", effect:"powerEnemy", val:-2}] },
+ { id:"b9", name:"圧倒", type:"break", cost:2, power:{min:1,max:4}, damage:{min:4,max:6}, effects:[{cond:"matchStart", effect:"powerEnemy", val:-3}] },
+ { id:"b10", name:"気合", type:"break", cost:1, power:{min:2,max:3}, damage:{min:2,max:4}, effects:[{cond:"matchStart", effect:"powerSelf", val:2}] },
+ 
+ // ドロー付き崩し
+ { id:"b11", name:"仕切り直し", type:"break", cost:1, power:{min:1,max:3}, damage:{min:2,max:2}, effects:[{cond:"always", effect:"draw", val:1}] },
+ { id:"b12", name:"好機", type:"break", cost:2, power:{min:2,max:4}, damage:{min:4,max:6}, effects:[{cond:"win", effect:"draw", val:2}] },
+ 
+ // 複合効果崩し
+ { id:"b13", name:"混乱の一撃", type:"break", cost:2, power:{min:1,max:5}, damage:{min:3,max:5}, effects:[{cond:"win", effect:"debuffEnemy", target:"datsuryoku", val:2, turns:2}, {cond:"win", effect:"buffSelf", target:"kassei", val:1, turns:2}] },
+ { id:"b14", name:"反撃の構え", type:"break", cost:2, power:{min:2,max:4}, damage:{min:4,max:6}, effects:[{cond:"win", effect:"buffSelf", target:"kyojin", val:2, turns:2}] },
+ { id:"b15", name:"全力崩し", type:"break", cost:3, power:{min:3,max:7}, damage:{min:8,max:12}, isExhaust:true, effects:[] },
+ 
+ //=== SPECIAL - 複合効果カード (3効果持ち) ===
+ // 超強力な3効果カード
+ { id:"s1", name:"完全戦術", type:"attack", cost:3, power:{min:3,max:5}, damage:{min:6,max:8}, isExhaust:true, effects:[
+   {cond:"always", effect:"draw", val:2},
+   {cond:"win", effect:"buffSelf", target:"kassei", val:3, turns:3},
+   {cond:"win", effect:"debuffEnemy", target:"zeijakuka", val:2, turns:3}
+ ]},
+ { id:"s2", name:"奥義・絶対防御", type:"defense", cost:3, power:{min:5,max:8}, damage:{min:0,max:0}, isExhaust:true, effects:[
+   {cond:"always", effect:"recoverAp", val:40},
+   {cond:"always", effect:"buffSelf", target:"kyojin", val:4, turns:3},
+   {cond:"win", effect:"destroyNext"}
+ ]},
+ { id:"s3", name:"血戦の狂乱", type:"attack", cost:3, power:{min:2,max:6}, damage:{min:5,max:8}, hits:3, isExhaust:true, effects:[
+   {cond:"win", effect:"buffSelf", target:"kyuketsu", val:3, turns:999},
+   {cond:"win", effect:"debuffEnemy", target:"shukketsu", val:4, turns:3},
+   {cond:"always", effect:"draw", val:1}
+ ]},
+ { id:"s4", name:"崩壊の連鎖", type:"break", cost:3, power:{min:2,max:7}, damage:{min:7,max:10}, isExhaust:true, effects:[
+   {cond:"win", effect:"debuffEnemy", target:"datsuryoku", val:3, turns:3},
+   {cond:"win", effect:"debuffEnemy", target:"zeijakuka", val:3, turns:3},
+   {cond:"win", effect:"debuffEnemy", target:"shukketsu", val:3, turns:3}
+ ]},
+ { id:"s5", name:"戦術再編", type:"defense", cost:2, power:{min:3,max:6}, damage:{min:0,max:0}, effects:[
+   {cond:"always", effect:"draw", val:2},
+   {cond:"always", effect:"clearDebuff"},
+   {cond:"win", effect:"recoverAp", val:20}
+ ]},
+ 
+ // 2効果の強力カード
+ { id:"s6", name:"猛攻", type:"attack", cost:2, power:{min:3,max:5}, damage:{min:6,max:8}, effects:[
+   {cond:"win", effect:"buffSelf", target:"kassei", val:2, turns:2},
+   {cond:"win", effect:"draw", val:1}
+ ]},
+ { id:"s7", name:"守護者の誓い", type:"defense", cost:2, power:{min:4,max:6}, damage:{min:0,max:0}, effects:[
+   {cond:"always", effect:"buffSelf", target:"kyojin", val:2, turns:3},
+   {cond:"always", effect:"recoverAp", val:15}
+ ]},
+ { id:"s8", name:"毒蝕の刃", type:"break", cost:2, power:{min:2,max:5}, damage:{min:4,max:7}, effects:[
+   {cond:"win", effect:"debuffEnemy", target:"shukketsu", val:3, turns:3},
+   {cond:"win", effect:"debuffEnemy", target:"datsuryoku", val:2, turns:2}
+ ]},
+ { id:"s9", name:"覚醒", type:"attack", cost:2, power:{min:2,max:4}, damage:{min:5,max:7}, isHpScale:true, effects:[
+   {cond:"win", effect:"buffSelf", target:"kassei", val:2, turns:3},
+   {cond:"always", effect:"draw", val:1}
+ ]},
+ { id:"s10", name:"鉄壁の構え", type:"defense", cost:2, power:{min:3,max:5}, damage:{min:0,max:0}, effects:[
+   {cond:"always", effect:"buffSelf", target:"kyojin", val:3, turns:2},
+   {cond:"win", effect:"destroyNext"}
+ ]},
+ 
+ // AP貫通+効果
+ { id:"s11", name:"致命の一突き", type:"attack", cost:3, power:{min:3,max:6}, damage:{min:8,max:10}, isApPierce:true, effects:[
+   {cond:"win", effect:"debuffEnemy", target:"shukketsu", val:5, turns:2},
+   {cond:"win", effect:"draw", val:1}
+ ]},
+ { id:"s12", name:"連続貫通", type:"attack", cost:3, power:{min:2,max:5}, damage:{min:4,max:5}, hits:2, isApPierce:true, effects:[
+   {cond:"win", effect:"buffSelf", target:"kassei", val:2, turns:2}
+ ]},
+ 
+ // 連撃+効果
+ { id:"s13", name:"連鎖斬撃", type:"attack", cost:3, power:{min:2,max:4}, damage:{min:3,max:4}, hits:4, effects:[
+   {cond:"win", effect:"buffSelf", target:"kassei", val:3, turns:2},
+   {cond:"win", effect:"draw", val:1}
+ ]},
+ { id:"s14", name:"乱れ撃ち", type:"break", cost:3, power:{min:1,max:4}, damage:{min:2,max:3}, hits:3, effects:[
+   {cond:"win", effect:"debuffEnemy", target:"datsuryoku", val:2, turns:2},
+   {cond:"always", effect:"draw", val:1}
+ ]},
+ 
+ // ユーティリティ複合
+ { id:"s15", name:"策略", type:"defense", cost:1, power:{min:1,max:3}, damage:{min:0,max:0}, effects:[
+   {cond:"always", effect:"draw", val:2},
+   {cond:"win", effect:"destroyNext"}
+ ]},
+ { id:"s16", name:"反撃準備", type:"defense", cost:2, power:{min:3,max:5}, damage:{min:0,max:0}, effects:[
+   {cond:"always", effect:"buffSelf", target:"kassei", val:2, turns:2},
+   {cond:"always", effect:"buffSelf", target:"kyojin", val:2, turns:2}
+ ]},
+ { id:"s17", name:"弱点看破", type:"break", cost:2, power:{min:2,max:5}, damage:{min:5,max:7}, effects:[
+   {cond:"matchStart", effect:"powerSelf", val:2},
+   {cond:"win", effect:"debuffEnemy", target:"zeijakuka", val:3, turns:2}
+ ]},
+ { id:"s18", name:"癒しの舞", type:"defense", cost:2, power:{min:2,max:4}, damage:{min:0,max:0}, effects:[
+   {cond:"always", effect:"buffSelf", target:"kyuketsu", val:2, turns:3},
+   {cond:"always", effect:"clearDebuff"},
+   {cond:"always", effect:"recoverAp", val:15}
+ ]},
+ 
+ //=== 特殊召喚カード ===
+ // トークン生成（コスト0カードを生成）
+ { id:"sp1", name:"魔力生成", type:"defense", cost:1, power:{min:2,max:4}, damage:{min:0,max:0}, effects:[{cond:"always", effect:"drawById", targetIds:["t1"], val:1}] },
+ { id:"sp2", name:"守護召喚", type:"defense", cost:1, power:{min:2,max:4}, damage:{min:0,max:0}, effects:[{cond:"win", effect:"drawById", targetIds:["t2"], val:1}] },
+ { id:"sp3", name:"混沌招来", type:"attack", cost:2, power:{min:2,max:5}, damage:{min:4,max:6}, effects:[{cond:"win", effect:"drawById", targetIds:["t3"], val:2}] },
+ 
+ 
+ // 強化版召喚（強力な専用カード）
+ { id:"sp4", name:"奥義・斬", type:"attack", cost:2, power:{min:3,max:5}, damage:{min:5,max:7}, isExhaust:true, effects:[{cond:"win", effect:"drawById", targetIds:["ex1"], val:1}] },
+ { id:"sp5", name:"奥義・守", type:"defense", cost:2, power:{min:3,max:6}, damage:{min:0,max:0}, isExhaust:true, effects:[{cond:"always", effect:"drawById", targetIds:["ex2"], val:1}] },
+ { id:"sp6", name:"奥義・崩", type:"break", cost:2, power:{min:2,max:5}, damage:{min:4,max:6}, isExhaust:true, effects:[{cond:"win", effect:"drawById", targetIds:["ex3"], val:1}] },
+ 
+ // 永続バフ召喚
+ { id:"sp7", name:"不死鳥召喚", type:"defense", cost:3, power:{min:3,max:5}, damage:{min:0,max:0}, isExhaust:true, effects:[{cond:"always", effect:"drawById", targetIds:["perm1"], val:1}] },
+ { id:"sp8", name:"狂戦士覚醒", type:"attack", cost:3, power:{min:2,max:4}, damage:{min:6,max:8}, isExhaust:true, effects:[{cond:"win", effect:"drawById", targetIds:["perm2"], val:1}] },
+ 
+ // チェーン召喚（召喚カードを召喚）
+ { id:"sp9", name:"召喚の儀式", type:"defense", cost:2, power:{min:2,max:4}, damage:{min:0,max:0}, effects:[{cond:"always", effect:"drawById", targetIds:["chain1"], val:1}] },
+ { id:"sp10", name:"連鎖の起動", type:"break", cost:2, power:{min:2,max:5}, damage:{min:3,max:5}, effects:[{cond:"win", effect:"drawById", targetIds:["chain2"], val:1}] },
+ 
+ // 複数召喚
+ { id:"sp11", name:"三位一体", type:"defense", cost:3, power:{min:3,max:6}, damage:{min:0,max:0}, isExhaust:true, effects:[{cond:"always", effect:"drawById", targetIds:["t1","t2","t3"], val:3}] },
+ { id:"sp12", name:"奥義解放", type:"attack", cost:3, power:{min:2,max:5}, damage:{min:5,max:8}, isExhaust:true, effects:[{cond:"win", effect:"drawById", targetIds:["ex1","ex2","ex3"], val:3}] },
+ 
+ // ランダム召喚風（同じカード複数）
+ { id:"sp13", name:"魔力暴走", type:"attack", cost:2, power:{min:1,max:4}, damage:{min:3,max:5}, effects:[{cond:"always", effect:"drawById", targetIds:["t1","t1","t1"], val:3}] },
+ { id:"sp14", name:"究極召喚", type:"defense", cost:3, power:{min:4,max:7}, damage:{min:0,max:0}, isExhaust:true, effects:[{cond:"always", effect:"drawById", targetIds:["ex1","ex2","ex3","perm1","perm2"], val:2}] }
+];
+
+const FIXED1_POOL = [
+ //本番用
+ {id: "s01",name: "危険察知",type: "defense",cost: 0,power: {min: 2,max: 5},damage: {min: 0,max: 0},effects: [{cond: "always",effect: "draw",val: 1}]},
+ {id: "s02",name: "状況観測",type: "defense",cost: 0,power: {min: 2,max: 4},damage: {min: 0,max: 0},effects: [{cond: "always",effect: "debuffEnemy",target: "zeijakuka",val: 2,turns: 3}]},
+ {id: "s03",name: "至高の一服",type: "defense",cost: 1,power: {min: 1,max: 3},damage: {min: 0,max: 0},effects: [{cond: "always",effect: "draw",val: 2}]},
+ {id: "s04",name: "弾き、返す",type: "defense",cost: 1,power: {min: 4,max: 7},damage: {min: 1,max: 3},effects: [{cond: "win",effect: "recoverAp",val: 5}]},
+ {id: "s05",name: "起死回生の一手",type: "defense",cost: 2,power: {min: 3,max: 8},damage: {min: 0,max: 0},effects: [{cond: "win",effect: "buffSelf",target: "kassei",val: 3,turns: 3}]},
+
+ {id: "s06",name: "モルデュール",type: "attack",cost: 3,power: {min: 4,max: 8},damage: {min: 15,max: 22},effects: [{cond: "win",effect: "destroyNext"},{cond: "matchStart",effect: "buffSelf",target: "kassei",val: 1,turns: 5}]},
+ {id: "s07",name: "無銘",type: "attack",cost: 0,power: {min: 3,max: 6},damage: {min: 4,max: 7},isExhaust: true,effects: [{cond: "always",effect:"drawById", targetIds:["ssp1"], val:1},{cond: "matchStart",effect: "powerSelf",val: 2}]},
+ {id: "s08",name: "白鞘",type: "attack",cost: 1,power: {min: 4,max: 8},damage: {min: 5,max: 8},effects: [{cond: "win",effect: "debuffEnemy",target: "shukketsu",val: 3,turns: 3}]},
+ {id: "s09",name: "シェイプショット",type: "attack",cost: 1,power: {min: 3,max: 7},damage: {min: 3,max: 9},hits: 3,effects: [{cond: "win",effect: "debuffEnemy",target: "datsuryoku",val: 2,turns: 3}]},
+ {id: "s10",name: "ラストレイ",type: "attack",cost: 2,power: {min: 4,max: 8},damage: {min: 6,max: 10},effects: [{cond: "win",effect: "buffSelf",target: "kassei",val: 2,turns: 3},{cond: "win",effect: "recoverAp",val: 10}]},
+
+ {id: "s10",name: "ニンファエア",type: "break",cost: 2,power: {min: 6,max: 9},damage: {min: 10,max: 17},isExhaust: true,isApPierce: true,effects: [{cond: "win",effect: "destroyNext"}]},
+ {id: "s11",name: "杭打ち",type: "break",cost: 0,power: {min: 2,max: 4},damage: {min: 5,max: 8},isHpScale: true,effects: [{cond: "win",effect: "debuffEnemy",target: "shukketsu",val: 1,turns: 5}]},
+ {id: "s12",name: "杭打ち",type: "break",cost: 0,power: {min: 2,max: 4},damage: {min: 5,max: 8},isHpScale: true,effects: [{cond: "win",effect: "debuffEnemy",target: "shukketsu",val: 1,turns: 5}]},
+ {id: "s13",name: "邪魔！",type: "break",cost: 1,power: {min: 1,max: 6},damage: {min: 3,max: 9},isApPierce: true,effects: [{cond: "win",effect: "clearDebuff"}]},
+ {id: "s14",name: "活路開拓",type: "break",cost: 2,power: {min: 4,max: 8},damage: {min: 6,max: 10},isApPierce: true,effects: [{cond: "win",effect: "buffSelf",target: "datsuryoku",val: 5,turns: 3}]}
+];
+
+// 特殊カードプール - 通常のドローでは引けず、特定の効果でのみ召喚可能
+const SPECIAL_POOL = [
+ {id: "ssp1",name: "試作鉄杭乙式",type: "break",cost: 2,power: {min: 5,max: 9},damage: {min: 8,max: 12},isExhaust: true,effects: [
+ {cond: "always",effect:"drawById", targetIds:["ssp2"], val:1},
+ {cond: "win",effect: "buffSelf",target: "zeijakuka",val: 5,turns: 3}
+]},
+{id: "ssp1",name: "串刺し",type: "attack",cost: 2,power: {min: 5,max: 9},damage: {min: 4,max: 12},hits: 5,isExhaust: true,isApPierce: true,isHpScale: true,effects: [
+  {cond: "always",effect:"drawById", targetIds:["s07"], val:1},
+  {cond: "win",effect: "buffSelf",target: "kyuketsu",val: 5,turns: 3}
+]},
+
+ // トークンカード（コスト0の使い捨てカード）
+ { id:"t1", name:"魔力の結晶", type:"attack", cost:0, power:{min:3,max:5}, damage:{min:5,max:7}, isExhaust:true, effects:[] },
+ { id:"t2", name:"守護霊", type:"defense", cost:0, power:{min:4,max:6}, damage:{min:0,max:0}, isExhaust:true, effects:[] },
+ { id:"t3", name:"混沌の刃", type:"break", cost:0, power:{min:2,max:4}, damage:{min:4,max:6}, isExhaust:true, effects:[] },
+ 
+ // 強化版カード（召喚専用の強力カード）
+ { id:"ex1", name:"真・全力斬り", type:"attack", cost:2, power:{min:4,max:8}, damage:{min:15,max:20}, isExhaust:true, effects:[] },
+ { id:"ex2", name:"真・完全防御", type:"defense", cost:2, power:{min:8,max:12}, damage:{min:0,max:0}, isExhaust:true, effects:[{cond:"always", effect:"recoverAp", val:30}] },
+ { id:"ex3", name:"真・シールド崩し", type:"break", cost:2, power:{min:4,max:8}, damage:{min:10,max:15}, isExhaust:true, effects:[{cond:"win", effect:"debuffEnemy", target:"shukketsu", val:5, turns:3}] },
+ 
+ // 永続効果カード
+ { id:"perm1", name:"不死鳥の加護", type:"defense", cost:1, power:{min:2,max:4}, damage:{min:0,max:0}, effects:[{cond:"always", effect:"buffSelf", target:"kyuketsu", val:3, turns:999}] },
+ { id:"perm2", name:"狂戦士の魂", type:"attack", cost:1, power:{min:3,max:5}, damage:{min:6,max:8}, effects:[{cond:"always", effect:"buffSelf", target:"kassei", val:3, turns:999}] },
+ 
+ // チェーンカード（さらに別のカードを生成）
+ { id:"chain1", name:"召喚陣", type:"defense", cost:1, power:{min:2,max:3}, damage:{min:0,max:0}, effects:[{cond:"always", effect:"drawById", targetIds:["t1","t2","t3"], val:3}] },
+ { id:"chain2", name:"連鎖召喚", type:"break", cost:2, power:{min:2,max:4}, damage:{min:4,max:6}, effects:[{cond:"win", effect:"drawById", targetIds:["ex1","ex2","ex3"], val:2}] },
+ 
+ // 特殊複合カード
+ { id:"ultra1", name:"究極の力", type:"attack", cost:3, power:{min:5,max:8}, damage:{min:12,max:15}, isExhaust:true, effects:[
+   {cond:"win", effect:"buffSelf", target:"kassei", val:5, turns:999},
+   {cond:"win", effect:"debuffEnemy", target:"shukketsu", val:8, turns:5},
+   {cond:"always", effect:"draw", val:2}
+ ]},
+ { id:"ultra2", name:"不滅の守護", type:"defense", cost:3, power:{min:7,max:10}, damage:{min:0,max:0}, isExhaust:true, effects:[
+   {cond:"always", effect:"recoverAp", val:50},
+   {cond:"always", effect:"buffSelf", target:"kyojin", val:5, turns:999},
+   {cond:"win", effect:"destroyNext"}
+ ]}
+];
+
+let playerDeckConfig = [];
+let selectedPassive = "warrior";
+let isFixedDeck1 = false;
+
+const player={hp:70,maxHp:70,ap:30,maxAp:30,cost:3,maxCost:3,deck:[],hand:[],selected:[],discard:[],exhaust:[], statuses:{}, pendingStatuses:[], passive:"warrior", apBroken:false, apBrokenTurns:0, pendingDraws:0, pendingSpecialDraws:[]};
+const enemy ={hp:70,maxHp:70,ap:30,maxAp:30,cost:3,maxCost:3,deck:[],hand:[],selected:[],discard:[],exhaust:[], statuses:{}, pendingStatuses:[], passive:"warrior", apBroken:false, apBrokenTurns:0, pendingDraws:0, pendingSpecialDraws:[]};
+
+const rand=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const shuffle=a=>a.sort(()=>Math.random()-0.5);
+
+function initSetup(){
+ const pool = document.getElementById("pool-list");
+ pool.innerHTML = PLAYER_POOL.map((c,i)=>`<div class="card ${c.isExhaust?'exhaust-type':''}" onclick="toggleCard(${i})" id="pool-${i}">${cardHTMLContent(c)}</div>`).join("");
+ 
+ const passOpts = document.getElementById("passive-options");
+ // incomplete_regenは固定デッキ専用なので選択画面から除外
+ passOpts.innerHTML = Object.entries(PASSIVES)
+  .filter(([k,p]) => k !== 'incomplete_regen')
+  .map(([k,p])=>
+   `<label style="cursor:pointer; background:#555; padding:6px 10px; border-radius:5px;">
+    <input type="radio" name="passive" value="${k}" ${k===selectedPassive?'checked':''} onchange="selectPassive('${k}')">
+    <strong>${p.name}</strong>: ${p.desc}</label>`
+  ).join("");
+ 
+ updateSetupCounts();
+}
+
+function selectPassive(key){ selectedPassive = key; }
+
+function toggleCard(i){
+ const c = PLAYER_POOL[i];
+ const inDeck = playerDeckConfig.filter(cd => cd.id === c.id).length;
+ if(inDeck < 5) playerDeckConfig.push({...c});
+ else playerDeckConfig.splice(playerDeckConfig.findIndex(cd => cd.id === c.id), 1);
+ updateSetupCounts();
+}
+
+function updateSetupCounts(){
+ const counts = {attack:0, defense:0, break:0};
+ playerDeckConfig.forEach(c => counts[c.type]++);
+ document.getElementById("cnt-attack").textContent = counts.attack;
+ document.getElementById("cnt-defense").textContent = counts.defense;
+ document.getElementById("cnt-break").textContent = counts.break;
+ 
+ PLAYER_POOL.forEach((c,i) => {
+  const cnt = playerDeckConfig.filter(cd => cd.id === c.id).length;
+  const el = document.getElementById(`pool-${i}`);
+  el.style.background = cnt > 0 ? '#555' : '#333';
+  el.style.borderColor = cnt >= 5 ? '#2ecc71' : '#aaa';
+ });
+ 
+ const ok = counts.attack === REQ_EACH && counts.defense === REQ_EACH && counts.break === REQ_EACH;
+ document.getElementById("start-game-btn").disabled = !ok;
+}
+
+function resetSetup(){ playerDeckConfig = []; isFixedDeck1 = false; updateSetupCounts(); }
+
+function randomSetup(){
+ playerDeckConfig = [];
+ const types = {attack:[], defense:[], break:[]};
+ PLAYER_POOL.forEach(c => types[c.type].push(c));
+ Object.keys(types).forEach(t => {
+  while(playerDeckConfig.filter(c=>c.type===t).length < REQ_EACH){
+   playerDeckConfig.push({...types[t][rand(0, types[t].length-1)]});
+  }
+ });
+ isFixedDeck1 = false;
+ updateSetupCounts();
+}
+
+function fixedSetup1(){
+ playerDeckConfig = [];
+ // 固定デッキを1回だけコピー（15枚になる）
+ FIXED1_POOL.forEach(c => playerDeckConfig.push({...c}));
+ isFixedDeck1 = true;
+ selectedPassive = "incomplete_regen"; // 固定デッキ専用パッシブ
+ updateSetupCounts();
+ // 固定デッキは特別なステータス
+ setTimeout(() => startGame(), 100);
+}
+
+function startGame(){
+ document.getElementById("setup-screen").style.display="none";
+ document.getElementById("game-screen").style.display="block";
+ 
+ if(isFixedDeck1){
+  player.hp = player.maxHp = 60;
+  player.ap = player.maxAp = 10;
+  player.passive = "incomplete_regen";
+  // 固定デッキ開始時に永続の吸血バフ+2を付与
+  player.statuses = {
+   kyuketsu: { stacks: 2, turns: 999 }
+  };
+ } else {
+  player.hp = player.maxHp = 70;
+  player.ap = player.maxAp = 30;
+  player.passive = selectedPassive;
+  player.statuses = {}; // 通常デッキはバフなしで開始
+ }
+ 
+ if(player.passive === "agile") player.maxCost = 4;
+ if(player.passive === "ap_boost") player.maxAp += 20;
+ 
+ player.deck = shuffle([...playerDeckConfig]);
+ 
+ // 敵は常にPLAYER_POOLからカードを選ぶ（固定デッキは使わない）
+ enemy.deck = [];
+ for(let i=0; i<15; i++) enemy.deck.push({...PLAYER_POOL[rand(0, PLAYER_POOL.length-1)]});
+ enemy.deck = shuffle(enemy.deck);
+ 
+ // 敵のパッシブをランダムに選択
+ const passiveKeys = Object.keys(PASSIVES).filter(k => k !== "none" && k !== "agile" && k !== "ap_boost");
+ enemy.passive = passiveKeys[rand(0, passiveKeys.length-1)];
+ 
+ startTurn();
+}
+
+function startTurn(){
+ [player, enemy].forEach(who => {
+  // APが0の場合、2ターン経過で全快
+  if(who.apBroken){
+   who.apBrokenTurns++;
+   if(who.apBrokenTurns >= 2){
+    who.ap = who.maxAp + (who.statuses.overcharge_buff?.stacks||0);
+    who.apBroken = false;
+    who.apBrokenTurns = 0;
+   }
+  }
+  
+  // ターン開始時: 手札を全て捨て札に移動（Slay the Spireスタイル）
+  while(who.hand.length > 0){
+   const card = who.hand.pop();
+   who.discard.push(card);
+  }
+  
+  // 基本5枚ドロー + 追加ドロー分
+  const totalDraws = 5 + who.pendingDraws;
+  drawCards(who, totalDraws);
+  
+  // 特殊ドロー処理
+  if(who.pendingSpecialDraws.length > 0){
+   for(const specialCard of who.pendingSpecialDraws){
+    if(who.hand.length >= 10) break; // 手札上限チェック
+    who.hand.push(specialCard);
+   }
+   who.pendingSpecialDraws = [];
+  }
+  
+  // ドローカウントリセット
+  who.pendingDraws = 0;
+  
+  who.cost = who === player ? player.maxCost : 3;
+  who.selected = [];
+  
+  // 出血ダメージ
+  if(who.statuses.shukketsu && who.statuses.shukketsu.stacks > 0){
+   const bleedDmg = who.statuses.shukketsu.stacks;
+   applyDamageToTarget(who, bleedDmg, false);
+  }
+ });
+ 
+ enemySelect();
+ render();
+}
+
+// 新しいドロー関数（Slay the Spireスタイル）
+function drawCards(who, n){
+ for(let i=0; i<n; i++){
+  // 手札上限チェック
+  if(who.hand.length >= 10) break;
+  
+  // 山札が空なら捨て札をシャッフルして山札に
+  if(who.deck.length === 0){
+   if(who.discard.length === 0) break; // 捨て札もなければ終了
+   who.deck = shuffle([...who.discard]);
+   who.discard = [];
+  }
+  
+  if(who.deck.length > 0){
+   who.hand.push(who.deck.shift());
+  }
+ }
+}
+
+// 旧draw関数は削除（drawCardsに置き換え）
+
+function resolveTurn(){
+ if(player.selected.length < 3) return;
+ let out = "<b>===== ターン開始 =====</b><br>";
+ 
+ for(let i=0; i<3; i++){
+  const p = player.selected[i];
+  const e = enemy.selected[i];
+  if(!p || !e) continue;
+  
+  const pCtx = {pMod:0, eMod:0, bonusDmg:0};
+  const eCtx = {pMod:0, eMod:0, bonusDmg:0};
+  
+  applyMatchStart(p, pCtx, player, enemy);
+  applyMatchStart(e, eCtx, enemy, player);
+  
+  let pPow = rand(p.power.min, p.power.max) + pCtx.pMod + eCtx.eMod;
+  let ePow = rand(e.power.min, e.power.max) + eCtx.pMod + pCtx.eMod;
+  
+  // パッシブ補正
+  if(player.passive === "luck") pPow = Math.max(pPow, p.power.min + 1);
+  if(enemy.passive === "luck") ePow = Math.max(ePow, e.power.min + 1);
+  if(player.passive === "overcharge" && player.ap > 0) pPow += 2;
+  if(enemy.passive === "overcharge" && enemy.ap > 0) ePow += 2;
+  
+  // 有利判定
+  if(advantage[p.type] === e.type) pPow *= 1.5;
+  if(advantage[e.type] === p.type) ePow *= 1.5;
+  
+  const winP = pPow > ePow;
+  const winE = ePow > pPow;
+  const result = winP ? "勝利!" : winE ? "敗北" : "引分";
+  
+  // always効果を先に適用（勝敗に関わらず発動）
+  let pLog = "", eLog = "";
+  applyEffects(p, false, player, enemy, i); // always効果を適用
+  applyEffects(e, false, enemy, player, i); // always効果を適用
+  
+  // ログ用のメッセージ作成
+  if(p.effects) p.effects.forEach(ef => { if(ef.cond === "always") pLog += applyEffectsLog(ef, player, enemy, i); });
+  if(e.effects) e.effects.forEach(ef => { if(ef.cond === "always") eLog += applyEffectsLog(ef, enemy, player, i); });
+  
+  // 勝利時の効果を追加適用
+  if(winP) applyEffects(p, true, player, enemy, i);
+  if(winE) applyEffects(e, true, enemy, player, i);
+  
+  let dmgMsg = "";
+  
+  const calcFinalDmg = (c, attacker, defender, extra) => {
+    let base = rand(c.damage.min, c.damage.max);
+    if(c.damage.mult) base *= c.damage.mult;
+    
+    // HP依存ダメージ
+    if(c.isHpScale) base += Math.floor((attacker.maxHp - attacker.hp) / 5);
+    
+    let d = base + (attacker.statuses.kassei?.stacks||0) - (attacker.statuses.datsuryoku?.stacks||0) 
+            + (defender.statuses.zeijakuka?.stacks||0) - (defender.statuses.kyojin?.stacks||0) + extra;
+    if(attacker.passive === "warrior") d += 2;
+    if(defender.passive === "iron") d -= 2;
+    return Math.max(0, Math.floor(d));
+  };
+
+  if(winP){
+    if(p.type==="attack"||p.type==="break"){ 
+        const hits = p.hits || 1;
+        let totalDmg = 0;
+        for(let h=0; h<hits; h++){
+          let d = calcFinalDmg(p, player, enemy, pCtx.bonusDmg);
+          totalDmg += applyDamageToTarget(enemy, d, p.isApPierce);
+        }
+        dmgMsg = `${totalDmg}ダメ${hits>1?'('+hits+'Hit)':''}`;
+    } else if(p.type==="defense"){
+        let d = (e.type==="break") ? calcFinalDmg(e, enemy, player, 0)*2 : calcFinalDmg({damage:{min:0,max:0}}, player, enemy, pCtx.bonusDmg);
+        if(e.type==="break") { 
+          const dmg = applyDamageToTarget(player, d, false);
+          dmgMsg = `カウンター被弾 ${dmg}`; 
+        } else { 
+          const dmg = applyDamageToTarget(enemy, d, false);
+          dmgMsg = `反撃 ${dmg}`; 
+        }
+    }
+    if(player.statuses.kyuketsu) player.hp = Math.min(player.maxHp, player.hp + player.statuses.kyuketsu.stacks);
+  } else if(winE){
+    if(e.type==="attack"||e.type==="break"){
+        const hits = e.hits || 1;
+        let totalDmg = 0;
+        for(let h=0; h<hits; h++){
+          let d = calcFinalDmg(e, enemy, player, eCtx.bonusDmg);
+          totalDmg += applyDamageToTarget(player, d, e.isApPierce);
+        }
+        dmgMsg = `${totalDmg}ダメ${hits>1?'('+hits+'Hit)':''}`;
+    } else if(e.type==="defense"){
+        let d = (p.type==="break") ? calcFinalDmg(p, player, enemy, 0)*2 : calcFinalDmg({damage:{min:0,max:0}}, enemy, player, eCtx.bonusDmg);
+        if(p.type==="break") { 
+          const dmg = applyDamageToTarget(enemy, d, false);
+          dmgMsg = `カウンター被弾 ${dmg}`; 
+        } else { 
+          const dmg = applyDamageToTarget(player, d, false);
+          dmgMsg = `反撃 ${dmg}`; 
+        }
+    }
+    if(enemy.statuses.kyuketsu) enemy.hp = Math.min(enemy.maxHp, enemy.hp + enemy.statuses.kyuketsu.stacks);
+  }
+
+  out+=`<b>マッチ${i+1}</b>: 自 ${TYPE_LABEL[p.type]} vs 敵 ${TYPE_LABEL[e.type]} (P:${pPow.toFixed(1)} vs ${ePow.toFixed(1)}) → ${result} ${dmgMsg} ${pLog} ${eLog}<br>`;
+  
+  // 破棄・捨て札処理
+  const handleEnd = (who, card) => {
+    if(card.type === "none") return;
+    if(card.isExhaust) who.exhaust.push(card); else who.discard.push(card);
+  };
+  handleEnd(player, p); handleEnd(enemy, e);
+  if(player.hp<=0 || enemy.hp<=0) break;
+ }
+
+ updateStatusAndRegen();
+ document.getElementById("log").innerHTML=out + "<hr>" + document.getElementById("log").innerHTML;
+ checkEndGame();
+}
+
+// APシステムのダメージ適用関数
+function applyDamageToTarget(target, dmg, isPierce){
+  if(dmg <= 0) return 0;
+  
+  // AP貫通またはAP全損中の場合、HPに直接ダメージ
+  if(isPierce || target.ap <= 0){
+    const actualDmg = Math.min(dmg, target.hp);
+    target.hp -= actualDmg;
+    return actualDmg;
+  }
+  
+  // APが残っている場合、9割をAPに、1割をHPに
+  const toHP = Math.floor(dmg * 0.1);
+  const toAP = Math.floor(dmg * 0.9);
+  
+  target.hp = Math.max(0, target.hp - toHP);
+  
+  if(target.ap < toAP){
+    // APが不足している場合、APを0にして過剰ダメージは切り捨て
+    target.ap = 0;
+    target.apBroken = true;
+    target.apBrokenTurns = 0; // AP全壊時にターンカウント初期化
+    return toHP; // HPに入ったダメージのみ返す
+  } else {
+    target.ap -= toAP;
+    return toHP + toAP;
+  }
+}
+
+function applyMatchStart(card, ctx, owner, opponent){
+ if(!card.effects) return "";
+ let log = "";
+ card.effects.forEach(e => {
+  if(e.cond !== "matchStart") return;
+  if(e.effect === "powerSelf") { ctx.pMod += e.val; log += `[自パワー${e.val>0?'+':''}${e.val}]`; }
+  if(e.effect === "powerEnemy") { ctx.eMod += e.val; log += `[敵パワー${e.val>0?'+':''}${e.val}]`; }
+ });
+ return log;
+}
+
+function applyEffects(card, isWin, owner, opponent, mIdx){
+ if(!card.effects) return;
+ 
+ card.effects.forEach(e => {
+  let ok = false;
+  
+  // isWin=false: always効果のみ処理
+  // isWin=true: win効果のみ処理（alwaysは既に処理済み）
+  if(isWin){
+   ok = (e.cond === "win"); // 勝利時のみwin効果を処理
+  } else {
+   ok = (e.cond === "always"); // always効果のみ処理
+  }
+  
+  if(!ok) return;
+  
+  switch(e.effect){
+    case "draw": 
+      // 通常ドロー - 次のターンに反映するためpendingDrawsに蓄積
+      owner.pendingDraws += e.val;
+      break;
+    case "drawSpecific": 
+      // 山札から特定のカードを引く（特殊ドロー）
+      const idx = owner.deck.findIndex(c => c.id === e.targetId);
+      if(idx !== -1) {
+        const drawnCard = owner.deck.splice(idx, 1)[0];
+        owner.pendingSpecialDraws.push(drawnCard);
+      }
+      break;
+    case "drawById":
+      // 指定されたIDのカードを特殊プールから生成（特殊ドロー）
+      if(e.targetIds && Array.isArray(e.targetIds)){
+        const numToDraw = e.val || e.targetIds.length;
+        for(let i = 0; i < numToDraw; i++){
+          if(i >= e.targetIds.length) break; // 配列の範囲外チェック
+          const cardId = e.targetIds[i];
+          // 複数のプールから検索
+          let specialCard = SPECIAL_POOL.find(c => c.id === cardId);
+          if(!specialCard) specialCard = PLAYER_POOL.find(c => c.id === cardId);
+          if(!specialCard) specialCard = FIXED1_POOL.find(c => c.id === cardId);
+          
+          if(specialCard){
+            // 新しいコピーを作成してpendingSpecialDrawsに追加
+            owner.pendingSpecialDraws.push({...specialCard});
+          }
+        }
+      } else if(e.targetId){
+        // 単一IDの場合（後方互換性）
+        let specialCard = SPECIAL_POOL.find(c => c.id === e.targetId);
+        if(!specialCard) specialCard = PLAYER_POOL.find(c => c.id === e.targetId);
+        if(!specialCard) specialCard = FIXED1_POOL.find(c => c.id === e.targetId);
+        
+        if(specialCard){
+          const numToDraw = e.val || 1;
+          for(let i = 0; i < numToDraw; i++){
+            owner.pendingSpecialDraws.push({...specialCard});
+          }
+        }
+      }
+      break;
+    case "buffSelf": grantStatus(owner, e.target, e.val, e.turns); break;
+    case "debuffEnemy": grantStatus(opponent, e.target, e.val, e.turns); break;
+    case "clearDebuff": 
+      const active = DEBUFFS.filter(k => owner.statuses[k]);
+      if(active.length) delete owner.statuses[active[rand(0, active.length-1)]]; 
+      break;
+    case "destroyNext":
+      if(mIdx < 2) opponent.selected[mIdx+1] = {name:"破壊済", type:"none", power:{min:0,max:0}, damage:{min:0,max:0}, effects:[]}; 
+      break;
+    case "recoverAp":
+      owner.ap = Math.min(owner.maxAp + (owner.statuses.overcharge_buff?.stacks||0), owner.ap + e.val);
+      if(owner.ap > 0) {
+        owner.apBroken = false;
+        owner.apBrokenTurns = 0;
+      }
+      break;
+  }
+ });
+}
+
+function applyEffectsLog(ef, owner, opponent, mIdx){
+  let log = "";
+  if(ef.effect === "draw") log += `[ドロー×${ef.val}]`;
+  if(ef.effect === "drawById") log += "[特殊召喚]";
+  if(ef.effect === "drawSpecific") log += "[特定ドロー]";
+  if(ef.effect === "recoverAp") log += `[AP+${ef.val}]`;
+  if(ef.effect === "clearDebuff") log += "[デバフ解除]";
+  if(ef.effect === "destroyNext") log += "[次破壊]";
+  return log;
+}
+
+function updateStatusAndRegen(){
+ [player, enemy].forEach(who => {
+  for(let k in who.statuses) { 
+    if(who.statuses[k].turns < 900) { 
+      who.statuses[k].turns--; 
+      if(who.statuses[k].turns <= 0) delete who.statuses[k]; 
+    } 
+  }
+  who.pendingStatuses.forEach(p => {
+    if(!who.statuses[p.type]) who.statuses[p.type] = { stacks:0, turns:0 };
+    who.statuses[p.type].stacks += p.val; 
+    who.statuses[p.type].turns = Math.max(who.statuses[p.type].turns, p.turns);
+  });
+  who.pendingStatuses = [];
+  
+  // AP増強バフの適用
+  if(who.statuses.overcharge_buff){
+    who.maxAp = (who === player ? (isFixedDeck1 ? 60 : 50) : 50) + who.statuses.overcharge_buff.stacks;
+  }
+  
+  if(who.hp > 0){
+    if(who.passive === "regen") who.hp = Math.min(who.maxHp, who.hp + 3);
+    if(who.passive === "incomplete_regen") who.hp = Math.min(who.maxHp, who.hp + 1);
+  }
+ });
+}
+
+function grantStatus(target, type, val, turns){ target.pendingStatuses.push({type, val, turns}); }
+
+function renderStatus(who){
+ return Object.entries(who.statuses).map(([k, s]) => {
+  const cls = BUFFS.includes(k) ? "buff" : "debuff";
+  return `<span class="status-item ${cls}" title="${STATUS_DESCS[k]}">${STATUS_NAMES[k]}${s.stacks}(${s.turns>900?'∞':s.turns})</span>`;
+ }).join("");
+}
+
+function cardHTMLContent(c){
+ const t=TYPE_LABEL[c.type];
+ const specials = [];
+ if(c.hits) specials.push(`${c.hits}連撃`);
+ if(c.isApPierce) specials.push("AP貫通");
+ if(c.isHpScale) specials.push("HP依存");
+ 
+ // 効果を見やすく整形
+ let effText = "なし";
+ if(c.effects && c.effects.length > 0){
+   const condMap = {
+     "always": "常時",
+     "win": "勝利時",
+     "matchStart": "開始時"
+   };
+   const effectMap = {
+     "draw": "ドロー",
+     "recoverAp": "AP回復",
+     "clearDebuff": "デバフ解除",
+     "destroyNext": "次破壊",
+     "buffSelf": "自バフ",
+     "debuffEnemy": "敵デバフ",
+     "powerSelf": "自P",
+     "powerEnemy": "敵P",
+     "drawSpecific": "特殊ドロー"
+   };
+   
+   effText = c.effects.map(e => {
+     const condStr = condMap[e.cond] || e.cond || "即時";
+     let effectStr = effectMap[e.effect] || e.effect;
+     
+     // 詳細情報を追加
+     if(e.target) effectStr += `:${STATUS_NAMES[e.target]}`;
+     if(e.val) effectStr += e.val > 0 ? `+${e.val}` : `${e.val}`;
+     if(e.turns && e.turns < 900) effectStr += `(${e.turns}T)`;
+     
+     return `${condStr}${effectStr}`;
+   }).join(" / ");
+ }
+ 
+ return `<div><span class="type-${t}">(${c.cost})${c.name}</span><br><small>P:${c.power.min}-${c.power.max} D:${c.damage.min}-${c.damage.max}${c.damage.mult?'x'+c.damage.mult:''}<br>${specials.length?specials.join(' ')+'<br>':''}${effText}${c.isExhaust?'<br>★破棄':''}</small></div>`;
+}
+
+function render(){
+ // HP/AP値とゲージ更新
+ document.getElementById("player-hp").textContent = player.hp;
+ document.getElementById("player-max-hp").textContent = player.maxHp;
+ document.getElementById("player-ap").textContent = player.ap;
+ document.getElementById("player-max-ap").textContent = player.maxAp + (player.statuses.overcharge_buff?.stacks||0);
+ document.getElementById("enemy-hp").textContent = enemy.hp;
+ document.getElementById("enemy-max-hp").textContent = enemy.maxHp;
+ document.getElementById("enemy-ap").textContent = enemy.ap;
+ document.getElementById("enemy-max-ap").textContent = enemy.maxAp + (enemy.statuses.overcharge_buff?.stacks||0);
+ 
+ // ゲージバー更新
+ const updateBar = (id, cur, max, isBroken) => {
+  const bar = document.getElementById(id);
+  if(bar){
+   bar.style.width = (cur/max*100) + "%";
+   if(isBroken || cur <= 0) bar.classList.add("gauge-broken");
+   else bar.classList.remove("gauge-broken");
+  }
+ };
+ 
+ updateBar("player-hp-bar", player.hp, player.maxHp, false);
+ updateBar("player-ap-bar", player.ap, player.maxAp + (player.statuses.overcharge_buff?.stacks||0), player.apBroken);
+ updateBar("enemy-hp-bar", enemy.hp, enemy.maxHp, false);
+ updateBar("enemy-ap-bar", enemy.ap, enemy.maxAp + (enemy.statuses.overcharge_buff?.stacks||0), enemy.apBroken);
+ 
+ document.getElementById("player-cost").textContent=player.cost;
+ document.getElementById("player-max-cost").textContent=player.maxCost;
+ document.getElementById("deck-count").textContent=player.deck.length;
+ document.getElementById("discard-count").textContent=player.discard.length;
+ document.getElementById("player-statuses").innerHTML = renderStatus(player);
+ document.getElementById("enemy-statuses").innerHTML = renderStatus(enemy);
+ 
+ const pP = PASSIVES[player.passive] || PASSIVES["none"];
+ const eP = PASSIVES[enemy.passive] || PASSIVES["none"];
+ document.getElementById("player-passive-view").innerHTML = `<span class="passive-badge" title="${pP.desc}">${pP.name}</span>`;
+ document.getElementById("enemy-passive-view").innerHTML = `<span class="passive-badge" title="${eP.desc}">${eP.name}</span>`;
+ 
+ document.getElementById("enemy-hand").innerHTML=enemy.selected.map(c => `<div class="card">${cardHTMLContent(c)}</div>`).join("");
+ document.getElementById("player-hand").innerHTML=player.hand.map((c,i)=>`<div class="card ${c.isExhaust?'exhaust-type':''}" onclick="selectCard(${i})">${cardHTMLContent(c)}</div>`).join("");
+ document.getElementById("selected").innerHTML=player.selected.map((c,i)=>`<div class="card ${c.isExhaust?'exhaust-type':''}" onclick="cancelSelected(${i})">${cardHTMLContent(c)}</div>`).join("");
+}
+
+function enemySelect(){
+ // 敵の手札をランダムにシャッフル（より強力に）
+ const shuffledHand = [...enemy.hand];
+ for(let i = shuffledHand.length - 1; i > 0; i--){
+  const j = Math.floor(Math.random() * (i + 1));
+  [shuffledHand[i], shuffledHand[j]] = [shuffledHand[j], shuffledHand[i]];
+ }
+ enemy.hand = shuffledHand;
+ 
+ // コスト内でカードを選択
+ for(const c of enemy.hand){ 
+  if(enemy.selected.length>=3) break; 
+  if(enemy.cost>=c.cost){ 
+   enemy.cost-=c.cost; 
+   const selectedCard = enemy.hand.splice(enemy.hand.indexOf(c), 1)[0];
+   enemy.selected.push(selectedCard); 
+  } 
+ }
+ 
+ // 3枚に満たない場合は無行動で埋める
+ while(enemy.selected.length<3) addWait(enemy);
+}
+function addWait(who = player){
+ if(who.selected.length < 3) who.selected.push({name:"無行動",type:"none",cost:0,power:{min:0,max:0},damage:{min:0,max:0},effects:[]});
+ render();
+}
+function selectCard(i){ const c=player.hand[i]; if(player.selected.length>=3||player.cost<c.cost) return; player.cost-=c.cost; player.selected.push(player.hand.splice(i,1)[0]); render(); }
+function cancelSelected(i){ const c=player.selected.splice(i,1)[0]; if(c.type!=="none"){ player.cost+=c.cost; player.hand.push(c); } render(); }
+function openModal(type){
+ document.getElementById("modal-overlay").style.display="block"; document.getElementById("info-modal").style.display="block";
+ document.getElementById("modal-title").textContent = type==='deck'?"山札":type==='discard'?"捨て札":"破棄カード";
+ const list = type==='deck'?player.deck : type==='discard'?player.discard : player.exhaust;
+ document.getElementById("modal-contents").innerHTML = list.map(c=>`<div class="card">${cardHTMLContent(c)}</div>`).join("");
+}
+function closeModal(){ document.getElementById("modal-overlay").style.display="none"; document.getElementById("info-modal").style.display="none"; }
+function checkEndGame(){
+ if(player.hp<=0 || enemy.hp<=0) {
+  document.getElementById("controls").style.display="none"; document.getElementById("game-over").style.display="block";
+  document.getElementById("result-msg").textContent = player.hp<=0 ? "敗北..." : "勝利！";
+  render();
+ } else { startTurn(); }
+}
+initSetup();
+</script>
+</body>
+</html>
